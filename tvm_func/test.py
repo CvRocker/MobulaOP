@@ -13,3 +13,4 @@ lib.CallPackedFunc.argtypes = [ctypes.c_void_p]
 lib.CallPackedFunc(a.handle)
 
 mx.nd.waitall()
+print (a)

@@ -8,7 +8,10 @@ void test_func(TVMArgs args, TVMRetValue* rv) {
   cout << "CALL FUNC" << endl;
   for (int i = 0; i < args.num_args; ++i) {
     // dltensor()
-    cout << args.values[i].v_handle << endl;
+    DLTensor* dl_tensor = static_cast<DLTensor*>(args.values[i].v_handle);
+    for (int j = 0; j < 3; ++j) {
+      ((float*)dl_tensor->data)[j] += 1;
+    }
   }
 }
 
