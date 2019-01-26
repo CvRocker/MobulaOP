@@ -1,6 +1,8 @@
-#include "packed_func.h"
+#include "tvm_packed_func.h"
+#include <cstring>
 #include <iostream>
 using namespace std;
+using namespace tvm;
 
 using TVMFunc = void(*)(TVMArgs, TVMRetValue*);
 
@@ -28,34 +30,31 @@ extern "C" {
 
 void SetMXTVMBridge(int(*MXTVMBridge)(PackedFunc)) {
   MXTVMBridge(PackedFunc([](TVMArgs args, TVMRetValue*) {
-    WrapAsyncCall = *static_cast<PackedFunc*>(args.values[1].v_handle);
+    if (strcmp(args.values[0].v_str, "WrapAsyncCall") == 0) {
+      WrapAsyncCall = *static_cast<PackedFunc*>(args.values[1].v_handle);
+      return;
+    }
+    throw runtime_error("Not register WrapAsyncCall");
   }));
 }
 
 PackedFunc packed_func;
 
 void RegisterFunc() {
-  PackedFunc *func = new PackedFunc(test_func);
-  PackedFunc *fset_stream = new PackedFunc(set_stream);
-  TVMValue *values = new TVMValue[3];
-  int *type_codes = new int[3]{kFuncHandle, kFuncHandle, kDLInt};
-  values[0].v_handle = func;
-  values[1].v_handle = fset_stream;
-  values[2].v_int64 = 0; // num_const
-  TVMArgs args(values, type_codes, 3);
-  TVMRetValue *rv = new TVMRetValue;
-  WrapAsyncCall.CallPacked(args, rv);
-  packed_func = *static_cast<PackedFunc*>(rv->value_.v_handle);
+  PackedFunc func(test_func);
+  PackedFunc fset_stream(set_stream);
+  TVMRetValue rv = WrapAsyncCall(func, fset_stream, 0);
+  packed_func = *static_cast<PackedFunc*>(rv.value_.v_handle);
 }
 
 
 void CallPackedFunc(void* p) {
-  TVMValue *values2 = new TVMValue[1];
-  values2[0].v_handle = p;
-  int *type_codes2 = new int[1]{kTVMNDArrayTypeCode};
-  TVMArgs args2(values2, type_codes2, 1);
-  TVMRetValue *rv2 = new TVMRetValue;
-  packed_func.CallPacked(args2, rv2);
+  TVMValue values[1];
+  values[0].v_handle = p;
+  int type_codes[1]{kTVMNDArrayTypeCode};
+  TVMArgs args(&values[0], &type_codes[0], 1);
+  TVMRetValue rv;
+  packed_func.CallPacked(args, &rv);
 }
 
 };
