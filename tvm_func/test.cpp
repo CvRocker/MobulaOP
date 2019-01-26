@@ -1,10 +1,13 @@
 #include "tvm_packed_func.h"
 #include <cstring>
 #include <iostream>
+#include <map>
+#include <string>
 using namespace std;
 using namespace tvm;
 
 using TVMFunc = void(*)(TVMArgs, TVMRetValue*);
+std::map<std::string, tvm::PackedFunc> PACKED_FUNCTIONS; 
 
 void test_func(TVMArgs args, TVMRetValue* rv) {
   cout << "CALL FUNC" << endl;
@@ -38,22 +41,23 @@ void SetMXTVMBridge(int(*MXTVMBridge)(PackedFunc)) {
   }));
 }
 
-PackedFunc packed_func;
 
-void RegisterFunc() {
+PackedFunc* RegisterFunc(const char* name) {
   PackedFunc func(test_func);
   PackedFunc fset_stream(set_stream);
   TVMRetValue rv = WrapAsyncCall(func, fset_stream, 0);
-  packed_func = *static_cast<PackedFunc*>(rv.value_.v_handle);
+  PACKED_FUNCTIONS[name] = *static_cast<PackedFunc*>(rv.value_.v_handle);
+  return &PACKED_FUNCTIONS[name];
 }
 
 
-void CallPackedFunc(void* p) {
+void CallPackedFunc(PackedFunc *pfunc, void* p) {
   TVMValue values[1];
   values[0].v_handle = p;
   int type_codes[1]{kTVMNDArrayTypeCode};
   TVMArgs args(&values[0], &type_codes[0], 1);
   TVMRetValue rv;
+  PackedFunc &packed_func = *pfunc;
   packed_func.CallPacked(args, &rv);
 }
 
