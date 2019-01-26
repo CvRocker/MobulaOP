@@ -16,6 +16,7 @@
 
 #include "./ctypes.h"
 #include "context/context.h"
+#include "tvm_packed_func.h"
 
 namespace mobula {
 

@@ -15,7 +15,7 @@ if config.USING_OPTIMIZATION:
 if config.DEBUG:
     COMMON_FLAGS.add_string('-g')
 COMMON_FLAGS.add_definition('USING_CBLAS', config.USING_CBLAS)
-INC_PATHS.append('inc')
+INC_PATHS.extend(['./inc', '../3rdparty/dlpack', '../3rdparty/tvm_packed_func'])
 for path in INC_PATHS:
     p = os.path.join(ENV_PATH, path)
     if p:

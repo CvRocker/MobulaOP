@@ -28,7 +28,7 @@ struct for_each_dispatcher {
 
 template <std::size_t I, typename F>
 struct for_each_dispatcher<true, I, F> {
-  static void run(const F& f) {}  // NOLINT(*)
+  static void run(const F&) {}  // NOLINT(*)
 };
 
 template <typename F, typename... Args>
@@ -37,6 +37,9 @@ inline void for_each(const F& f, Args&&... args) {  // NOLINT(*)
       f, std::forward<Args>(args)...);
 }
 }  // namespace detail
+
+class NDArray {};
+typedef NDArray* NDArrayHandle;
 
 typedef enum {
   kHandle = 3U,
@@ -63,8 +66,8 @@ class TVMArgs {
   const TVMValue* values;
   const int* type_codes;
   int num_args;
-  TVMArgs(const TVMValue* values, const int* type_codes, int num_args)
-      : values(values), type_codes(type_codes), num_args(num_args) {}
+  TVMArgs(const TVMValue* _values, const int* _type_codes, int _num_args)
+      : values(_values), type_codes(_type_codes), num_args(_num_args) {}
   inline int size() const { return num_args; }
 };
 
@@ -124,6 +127,10 @@ class TVMArgsSetter {
   void operator()(size_t i, const PackedFunc& value) const {  // NOLINT(*)
     values_[i].v_handle = const_cast<PackedFunc*>(&value);
     type_codes_[i] = kFuncHandle;
+  }
+  void operator()(size_t i, const NDArrayHandle value) const {  // NOLINT(*)
+    values_[i].v_handle = static_cast<void*>(value);
+    type_codes_[i] = kTVMNDArrayTypeCode;
   }
 
  private:

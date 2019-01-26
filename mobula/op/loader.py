@@ -288,14 +288,31 @@ extern "C" {
     source_to_so_ctx(build_path, srcs, target_name, ctx, buildin_cpp)
 
 
-def _generate_kernel_code(func_idcode_hash, args_def, func_name, args_inst):
-    return '''
+def _generate_kernel_code(func_idcode_hash, arg_types, arg_names, func_name):
+    args_def = ', '.join(['{ctype} {name}'.format(
+        ctype=dtype.cname,
+        name=name
+    ) for dtype, name in zip(arg_types, arg_names)])
+    args_inst = ', '.join(arg_names)
+
+    kernel_code = '''
 MOBULA_DLL void %s(const int device_id, %s) {
   KERNEL_RUN_BEGIN(device_id);
   KERNEL_RUN(%s)(%s);
   KERNEL_RUN_END();
 }
 ''' % (func_idcode_hash, args_def, func_name, args_inst)
+
+    args_def_async_mx = ', '.join(['{ctype} {name}'.format(
+        ctype='tvm::NDArrayHandle' if dtype.is_pointer else dtype.cname,
+        name=name
+    ) for dtype, name in zip(arg_types, arg_names)])
+    async_mx_code = '''
+MOBULA_DLL void %s_async_mx(tvm::PackedFunc *packed_func, %s) {
+  (*packed_func)(%s);
+}
+''' % (func_idcode_hash, args_def_async_mx, args_inst)
+    return kernel_code + async_mx_code
 
 
 def _generate_func_code(func_idcode_hash, rtn_type, args_def, func_name, args_inst):
@@ -318,15 +335,10 @@ def _generate_ordinary_code(cpp_info):
             continue
         func_idcode = get_func_idcode(func_name, ord_cfunc.arg_types)
         func_idcode_hash = get_idcode_hash(func_idcode)
-        args_def = ', '.join(['{ctype} {name}'.format(
-            ctype=dtype.cname,
-            name=name
-        ) for dtype, name in zip(ord_cfunc.arg_types, ord_cfunc.arg_names)])
-        args_inst = ', '.join(ord_cfunc.arg_names)
         func_kind = ord_cfunc.func_kind
         if func_kind == CFuncDef.KERNEL:
             code_buffer += _generate_kernel_code(
-                func_idcode_hash, args_def, '{}_kernel'.format(func_name), args_inst)
+                func_idcode_hash, ord_cfunc.arg_types, ord_cfunc.arg_names, '{}_kernel'.format(func_name))
     return code_buffer
 
 
@@ -352,14 +364,8 @@ def _update_template_inst_map(idcode, tmap, cfunc, arg_types):
         Exception('Template List: {}, mapping: {}'.
                   format(cfunc.template_list, template_mapping))
 
-    args_def = ', '.join(['{ctype} {name}'.format(
-        ctype=dtype.cname,
-        name=name
-    ) for dtype, name in zip(arg_types, cfunc.arg_names)])
-
     template_inst = [template_mapping[tname]
                      for tname in cfunc.template_list]
-    args_inst = ', '.join(cfunc.arg_names)
     template_post = '<%s>' % (', '.join(template_inst))
     rtn_type = cfunc.rtn_type
     if rtn_type in template_mapping:
@@ -367,11 +373,11 @@ def _update_template_inst_map(idcode, tmap, cfunc, arg_types):
 
     func_kind = cfunc.func_kind
     if func_kind == CFuncDef.KERNEL:
-        code = _generate_kernel_code(func_idcode_hash, args_def, '({}_kernel{})'.format(
-            func_name, template_post), args_inst)
+        code = _generate_kernel_code(func_idcode_hash, arg_types, cfunc.arg_names, '({}_kernel{})'.format(
+            func_name, template_post))
     else:
         code = _generate_func_code(
-            func_idcode_hash, rtn_type, args_def, func_name + template_post, args_inst)
+            func_idcode_hash, rtn_type, arg_types, cfunc.arg_names, func_name + template_post)
     tmap[idcode] = code
 
 
