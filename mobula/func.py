@@ -87,7 +87,9 @@ class CFuncDef:
         # function loader
         func = self.loader(self, arg_types, ctx, **self.loader_kwargs)
         if glue_mod is not None:
-            return func.mx(*arg_datas)
+            async_name = getattr(glue_mod, 'async_name', None)
+            if async_name is not None:
+                return getattr(func, async_name)(*arg_datas)
         if self.func_kind == self.KERNEL:
             return func(dev_id, *arg_datas)
         return func(*arg_datas)
@@ -107,15 +109,6 @@ class MobulaFunc:
         self.name = name
         self.func = func
 
-        self.wait_to_read_list = []
-        self.wait_to_write_list = []
-        for i, ptype in enumerate(self.func.arg_types):
-            if ptype.is_pointer:
-                if ptype.is_const:
-                    self.wait_to_read_list.append(i)
-                else:
-                    self.wait_to_write_list.append(i)
-
     def __call__(self, *args, **kwargs):
         # move kwargs into args
         args = list(args)
@@ -129,14 +122,6 @@ class MobulaFunc:
         temp_var_list = []
         arg_types = []
         template_mapping = dict()
-
-        # Pre-process
-        '''
-        for i in self.wait_to_read_list:
-            self._wait_to_read(args[i])
-        for i in self.wait_to_write_list:
-            self._wait_to_write(args[i])
-        '''
 
         glue_mod = None
         for var, ptype in zip(args, self.func.arg_types):
@@ -188,16 +173,6 @@ class MobulaFunc:
         return rtn
 
     @staticmethod
-    def _wait_to_read(var):
-        if hasattr(var, 'wait_to_read'):
-            var.wait_to_read()
-
-    @staticmethod
-    def _wait_to_write(var):
-        if hasattr(var, 'wait_to_write'):
-            var.wait_to_write()
-
-    @staticmethod
     def _get_tensor_info(var, ptype, noncont_var_list, temp_var_list, template_mapping):
         """Get tensor info
 
@@ -228,10 +203,8 @@ class MobulaFunc:
             # data = (contiguous_array_pointer, contiguous_array_object)
             if ptype.is_const:
                 temp_var_list.append(data[1])  # hold a reference
-                MobulaFunc._wait_to_read(data[1])
             else:
                 noncont_var_list.append((var, data[1]))
-                MobulaFunc._wait_to_write(data[1])
             data = data[0]
         dev_id = glue_mod.dev_id(var)
         ctype = ctypes.POINTER(glue_mod.get_ctype(var))

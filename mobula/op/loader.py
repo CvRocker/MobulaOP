@@ -11,6 +11,7 @@ from ..build import source_to_so_ctx, build_context, file_changed
 from ..utils import get_git_hash
 from ..dtype import DType, TemplateType
 from ..version import OP_LOAD_MODULE_BUILD_VERSION
+from ..glue.backend import get_glue_modules
 
 
 if sys.version_info[0] >= 3:
@@ -420,16 +421,13 @@ def _add_function(func_map, func_idcode, cpp_info):
     assert func is not None,\
         Exception('No function `{}` in DLL {}'.format(
             func_idcode, dll_fname))
+
     # register for MXNet
-    from mxnet.base import _LIB
-    cpp_info.dll.SetMXTVMBridge.argtypes = [ctypes.c_void_p]
-    cpp_info.dll.SetMXTVMBridge(_LIB.MXTVMBridge)
-    register_func_for_mx = getattr(
-        cpp_info.dll, func_idcode_hash + '_register_mx')
-    async_func_for_mx = getattr(cpp_info.dll, func_idcode_hash + '_async_mx')
-    register_func_for_mx.restype = ctypes.c_void_p
-    packed_func_mx = ctypes.c_void_p(register_func_for_mx())
-    func.mx = lambda *args: async_func_for_mx(packed_func_mx, *args)
+    for glue_mod in get_glue_modules():
+        async_name = getattr(glue_mod, 'async_name', None)
+        if async_name is not None:
+            async_func = glue_mod.get_async_func(cpp_info, func_idcode_hash)
+            setattr(func, async_name, async_func)
 
     func_map[func_idcode] = func
 

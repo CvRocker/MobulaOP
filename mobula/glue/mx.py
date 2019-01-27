@@ -3,6 +3,7 @@ import mxnet as mx
 from mxnet.base import _LIB
 from .common import *
 
+
 if not hasattr(mx.nd.NDArray, 'empty_like'):
     mx.nd.empty_like = lambda x: mx.nd.empty(x.shape, dtype=x.dtype)
 if not hasattr(mx.nd.NDArray, 'wait_to_write'):
@@ -12,9 +13,6 @@ if not hasattr(mx.nd.NDArray, 'wait_to_write'):
 
 def get_pointer(v):
     return v.handle
-    cp = ctypes.c_void_p()
-    _LIB.MXNDArrayGetData(v.handle, ctypes.byref(cp))
-    return cp
 
 
 def get_ctype(v):
@@ -25,6 +23,21 @@ def dev_id(a):
     if isinstance(a, mx.nd.NDArray):
         return a.context.device_id if a.context.device_type == 'gpu' else None
     return None
+
+
+async_name = 'mx'
+
+
+def get_async_func(cpp_info, func_idcode_hash):
+    cpp_info.dll.SetMXTVMBridge.argtypes = [ctypes.c_void_p]
+    cpp_info.dll.SetMXTVMBridge(_LIB.MXTVMBridge)
+    register_func_for_mx = getattr(
+        cpp_info.dll, func_idcode_hash + '_register_mx')
+    async_func_for_mx = getattr(cpp_info.dll, func_idcode_hash + '_async_mx')
+    register_func_for_mx.restype = ctypes.c_void_p
+    packed_func_mx = ctypes.c_void_p(register_func_for_mx())
+    func = lambda *args: async_func_for_mx(packed_func_mx, *args)
+    return func
 
 
 class OpGen(object):
