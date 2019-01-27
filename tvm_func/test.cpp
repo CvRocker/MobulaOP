@@ -2,6 +2,9 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <cstdio>
+#include <dlfcn.h>
+#include <cstring>
 #include "tvm_packed_func.h"
 using namespace std;
 using namespace tvm;
@@ -35,6 +38,14 @@ void add_func(float* a) { a[0] += 1; }
 
 PackedFunc WrapAsyncCall;
 
+template <typename T>
+void print_args(T *args) {
+    char *ss = (char*)(void*)args;
+    for (int u = 0;u < sizeof(T); ++u) {
+      printf("%x, ", ss[u] & 0xFF);
+    }
+}
+
 extern "C" {
 
 void test_func(TVMArgs args, TVMRetValue* rv) {
@@ -48,15 +59,20 @@ void test_func(TVMArgs args, TVMRetValue* rv) {
   }
 }
 
-void SetMXTVMBridge(int (*MXTVMBridge)(PackedFunc)) {
-  MXTVMBridge(PackedFunc([](TVMArgs args, TVMRetValue*) {
+void SetMXTVMBridge(int (*MXTVMBridge)(PackedFunc*)) {
+  PackedFunc *packed_func = new PackedFunc([](TVMArgs args, TVMRetValue*) {
+      cout << "ENTER" << args.num_args << endl;
+
+      cout << "STR:" << args.values[0].v_str << endl;
     if (strcmp(args.values[0].v_str, "WrapAsyncCall") == 0) {
       WrapAsyncCall = *static_cast<PackedFunc*>(args.values[1].v_handle);
       return;
     }
-    throw runtime_error("Not register WrapAsyncCall");
-  }));
+    throw std::runtime_error("Not register WrapAsyncCall");
+  });
+  MXTVMBridge(packed_func);
 }
+
 
 PackedFunc* RegisterTVMFunc(const char* name, TVMFunc pfunc, int num_const,
                             int* const_loc) {
@@ -106,3 +122,23 @@ name, F func) { RegisterTVMFunc(name, [=](TVMArgs args, TVMRetValue* rv){
   });
 }
 */
+
+int main() {
+  cout << sizeof(TVMValue) << endl;
+  cout << sizeof(TVMArgs) << endl;
+  cout << "==========" << endl;
+  cout << sizeof(const TVMValue*) << ", " << sizeof(const int*) << ", " << sizeof(int) << endl;
+  TVMArgs aaa((TVMValue*)(void*)0xFFFFFFFFFFFFFFFF, (const int*)(void*)0xFFFFFFFFFFFFFFFF, 0xFFFFFFFF);
+  print_args(&aaa);
+  cout << sizeof(TVMRetValue) << endl;
+  const char path[] = "/usr/lib/python3.7/site-packages/mxnet/libmxnet.so";
+  //const char path[] = "/home/wkcn/proj/incubator-mxnet/lib/libmxnet.so";
+  typedef int(*MXTVMBridge_)(PackedFunc *); 
+  MXTVMBridge_ bridge = nullptr;
+  void *handle = dlopen(path, RTLD_LAZY);
+  cout << handle << endl;
+  bridge = (MXTVMBridge_)dlsym(handle, "MXTVMBridge");
+  cout << (void*)bridge << endl;
+  SetMXTVMBridge(bridge);
+  return 0;
+}
