@@ -288,6 +288,20 @@ extern "C" {
     source_to_so_ctx(build_path, srcs, target_name, ctx, buildin_cpp)
 
 
+def _dtype_to_tvm_value_type(dtype):
+    if dtype.is_pointer:
+        return 'v_handle'
+    if 'int' in dtype.cname:
+        return 'v_int64'
+    return 'v_float64'
+
+def _get_args_inst_mx(i, t):
+    s = 'args.values[%d].%s' % (i, _dtype_to_tvm_value_type(t))
+    if t.is_pointer:
+        return 'static_cast<%s>(static_cast<DLTensor*>(%s)->data)' % (t.cname, s)
+    return s
+
+
 def _generate_kernel_code(func_idcode_hash, arg_types, arg_names, func_name):
     args_def = ', '.join(['{ctype} {name}'.format(
         ctype=dtype.cname,
@@ -307,12 +321,29 @@ MOBULA_DLL void %s(const int device_id, %s) {
         ctype='tvm::NDArrayHandle' if dtype.is_pointer else dtype.cname,
         name=name
     ) for dtype, name in zip(arg_types, arg_names)])
+
+    args_inst_mx = [_get_args_inst_mx(i, t) for i, t in enumerate(arg_types)]
+    num_const = 0
+    const_loc = []
+    for i, dtype in enumerate(arg_types):
+        if dtype.is_const and dtype.is_pointer:
+            const_loc.append(i)
+            num_const += 1
+    const_loc_code = 'nullptr' if num_const == 0 else 'std::unique_ptr<int[]>(new int[%d]{%s}).get()' % (num_const, ','.join([str(u) for u in const_loc]))
+    register_mx_code = '''
+MOBULA_DLL tvm::PackedFunc* %s_mx_register() {
+  return RegisterTVMFunc("%s", [](tvm::TVMArgs args, tvm::TVMRetValue*) {
+    KERNEL_RUN(%s)(%s);
+  }, %d, %s);
+}
+''' % (func_idcode_hash, func_idcode_hash, func_name, ', '.join(args_inst_mx), num_const, const_loc_code)
+
     async_mx_code = '''
 MOBULA_DLL void %s_async_mx(tvm::PackedFunc *packed_func, %s) {
   (*packed_func)(%s);
 }
 ''' % (func_idcode_hash, args_def_async_mx, args_inst)
-    return kernel_code + async_mx_code
+    return kernel_code + register_mx_code + async_mx_code
 
 
 def _generate_func_code(func_idcode_hash, rtn_type, args_def, func_name, args_inst):

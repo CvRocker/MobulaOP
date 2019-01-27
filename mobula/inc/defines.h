@@ -16,7 +16,7 @@
 
 #include "./ctypes.h"
 #include "context/context.h"
-#include "tvm_packed_func.h"
+#include "./glue_mx.h"
 
 namespace mobula {
 
