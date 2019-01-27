@@ -2,12 +2,13 @@
 #define MOBULA_INC_GLUE_MX_H_
 
 #include <cstring>
+#include <functional>
 #include <vector>
 #include "tvm_packed_func.h"
 
 namespace mobula {
 using namespace tvm;
-using TVMFunc = void (*)(TVMArgs, TVMRetValue*);
+using TVMFunc = std::function<void(TVMArgs args, TVMRetValue* rv)>;
 
 class MXNetAsyncCtx {
  public:
