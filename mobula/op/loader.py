@@ -295,6 +295,7 @@ def _dtype_to_tvm_value_type(dtype):
         return 'v_int64'
     return 'v_float64'
 
+
 def _get_args_inst_mx(i, t):
     s = 'args.values[%d].%s' % (i, _dtype_to_tvm_value_type(t))
     if t.is_pointer:
@@ -329,9 +330,10 @@ MOBULA_DLL void %s(const int device_id, %s) {
         if dtype.is_const and dtype.is_pointer:
             const_loc.append(i)
             num_const += 1
-    const_loc_code = 'nullptr' if num_const == 0 else 'std::unique_ptr<int[]>(new int[%d]{%s}).get()' % (num_const, ','.join([str(u) for u in const_loc]))
+    const_loc_code = 'nullptr' if num_const == 0 else 'std::unique_ptr<int[]>(new int[%d]{%s}).get()' % (
+        num_const, ','.join([str(u) for u in const_loc]))
     register_mx_code = '''
-MOBULA_DLL tvm::PackedFunc* %s_mx_register() {
+MOBULA_DLL tvm::PackedFunc* %s_register_mx() {
   return RegisterTVMFunc("%s", [](tvm::TVMArgs args, tvm::TVMRetValue*) {
     KERNEL_RUN(%s)(%s);
   }, %d, %s);
@@ -410,6 +412,26 @@ def _update_template_inst_map(idcode, tmap, cfunc, arg_types):
         code = _generate_func_code(
             func_idcode_hash, rtn_type, arg_types, cfunc.arg_names, func_name + template_post)
     tmap[idcode] = code
+
+
+def _add_function(func_map, func_idcode, cpp_info):
+    func_idcode_hash = get_idcode_hash(func_idcode)
+    func = getattr(cpp_info.dll, func_idcode_hash, None)
+    assert func is not None,\
+        Exception('No function `{}` in DLL {}'.format(
+            func_idcode, dll_fname))
+    # register for MXNet
+    from mxnet.base import _LIB
+    cpp_info.dll.SetMXTVMBridge.argtypes = [ctypes.c_void_p]
+    cpp_info.dll.SetMXTVMBridge(_LIB.MXTVMBridge)
+    register_func_for_mx = getattr(
+        cpp_info.dll, func_idcode_hash + '_register_mx')
+    async_func_for_mx = getattr(cpp_info.dll, func_idcode_hash + '_async_mx')
+    register_func_for_mx.restype = ctypes.c_void_p
+    packed_func_mx = ctypes.c_void_p(register_func_for_mx())
+    func.mx = lambda *args: async_func_for_mx(packed_func_mx, *args)
+
+    func_map[func_idcode] = func
 
 
 def op_loader(cfunc, arg_types, ctx, cpp_info):
@@ -509,21 +531,11 @@ Please update MobulaOP.""" % (map_data.get('version'), OP_LOAD_MODULE_BUILD_VERS
         for func_name, ord_cfunc in cpp_info.function_args.items():
             if not ord_cfunc.template_list:
                 func_idcode = get_func_idcode(func_name, ord_cfunc.arg_types)
-                func_idcode_hash = get_idcode_hash(func_idcode)
-                func = getattr(cpp_info.dll, func_idcode_hash, None)
-                assert func is not None,\
-                    Exception('No function `{}` in DLL {}'.format(
-                        func_idcode, dll_fname))
-                func_map[func_idcode] = func
+                _add_function(func_map, func_idcode, cpp_info)
 
         # template functions
         for func_idcode in tmap.keys():
-            func_idcode_hash = get_idcode_hash(func_idcode)
-            func = getattr(cpp_info.dll, func_idcode_hash, None)
-            assert func is not None,\
-                Exception('No function `{}` in DLL {}'.format(
-                    func_idcode, dll_fname))
-            func_map[func_idcode] = func
+            _add_function(func_map, func_idcode, cpp_info)
 
         if removed_dll_fname is not None:
             try:
@@ -615,6 +627,7 @@ def _get_functions_from_cpp(cpp_fname):
     # Load dynamic file
     functions = dict(
         (name, CFuncDef(**kwargs)) for name, kwargs in function_args.items())
+    # Load dynamic function for MXNet
     return functions
 
 

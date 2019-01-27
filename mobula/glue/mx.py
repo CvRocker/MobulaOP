@@ -11,6 +11,7 @@ if not hasattr(mx.nd.NDArray, 'wait_to_write'):
 
 
 def get_pointer(v):
+    return v.handle
     cp = ctypes.c_void_p()
     _LIB.MXNDArrayGetData(v.handle, ctypes.byref(cp))
     return cp

@@ -78,7 +78,7 @@ class CFuncDef:
         self.loader = loader
         self.loader_kwargs = loader_kwargs
 
-    def __call__(self, arg_datas, arg_types, dev_id):
+    def __call__(self, arg_datas, arg_types, dev_id, glue_mod=None):
         if dev_id is None:
             ctx = 'cpu'
             dev_id = -1
@@ -86,6 +86,8 @@ class CFuncDef:
             ctx = GPU_CTX_NAME
         # function loader
         func = self.loader(self, arg_types, ctx, **self.loader_kwargs)
+        if glue_mod is not None:
+            return func.mx(*arg_datas)
         if self.func_kind == self.KERNEL:
             return func(dev_id, *arg_datas)
         return func(*arg_datas)
@@ -129,16 +131,23 @@ class MobulaFunc:
         template_mapping = dict()
 
         # Pre-process
+        '''
         for i in self.wait_to_read_list:
             self._wait_to_read(args[i])
         for i in self.wait_to_write_list:
             self._wait_to_write(args[i])
+        '''
 
+        glue_mod = None
         for var, ptype in zip(args, self.func.arg_types):
             if ptype.is_pointer:
                 # The type of `var` is Tensor.
-                data, var_dev_id, ctype = self._get_tensor_info(
+                data, var_dev_id, ctype, glue_mod_ = self._get_tensor_info(
                     var, ptype, noncont_var_list, temp_var_list, template_mapping)
+                if glue_mod is None:
+                    glue_mod = glue_mod_
+                elif glue_mod != glue_mod_:
+                    glue_mod = 0
             else:
                 # The type of `var` is Scalar.
                 data, var_dev_id, ctype = self._get_scalar_info(var, ptype)
@@ -157,6 +166,8 @@ class MobulaFunc:
                         "Don't use multiple devices in a call :-(")
                 else:
                     dev_id = var_dev_id
+        if glue_mod == 0:
+            glue_mod = None
 
         # try to know the unknown ctype
         for i, vtype in enumerate(arg_types):
@@ -169,7 +180,8 @@ class MobulaFunc:
 
         rtn = self.func(arg_datas=arg_datas,
                         arg_types=arg_types,
-                        dev_id=dev_id)
+                        dev_id=dev_id,
+                        glue_mod=glue_mod)
 
         for source, target in noncont_var_list:
             source[:] = target
@@ -234,7 +246,7 @@ class MobulaFunc:
             TypeError('Expected Type {} instead of {}'.format(
                 expected_ctype, ctype))
         data = ctypes.cast(data, ctype)
-        return data, dev_id, ctype
+        return data, dev_id, ctype, glue_mod
 
     @staticmethod
     def _get_scalar_info(var, ptype):

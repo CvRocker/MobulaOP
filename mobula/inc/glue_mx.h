@@ -1,4 +1,4 @@
-#ifndef MOBULA_INC_GLUE_MX_H_ 
+#ifndef MOBULA_INC_GLUE_MX_H_
 #define MOBULA_INC_GLUE_MX_H_
 
 #include <cstring>
@@ -7,19 +7,19 @@
 #include <string>
 #include "tvm_packed_func.h"
 
-
 namespace mobula {
 using namespace tvm;
 using TVMFunc = void (*)(TVMArgs, TVMRetValue*);
 
 class MXNetAsyncCtx {
-public:
+ public:
   void set_stream(int dev_type, int dev_id, void* strm) {
     dev_type_ = dev_type;
     dev_id_ = dev_id;
     strm_ = strm;
   }
-private:
+
+ private:
   int dev_type_, dev_id_;
   void* strm_;
 };
@@ -33,14 +33,13 @@ void set_stream(TVMArgs args, TVMRetValue*) {
   MXNetAsyncCtx[dev_type].set_stream(dev_type, dev_id, strm);
 }
 
-} // namespace mobula
+}  // namespace mobula
 
 extern "C" {
 using namespace mobula;
 using namespace tvm;
 
-std::map<std::string, PackedFunc> PACKED_FUNCTIONS;
-PackedFunc WrapAsyncCall;
+static PackedFunc WrapAsyncCall;
 
 void SetMXTVMBridge(int (*MXTVMBridge)(PackedFunc)) {
   MXTVMBridge(PackedFunc([](TVMArgs args, TVMRetValue*) {
@@ -52,15 +51,19 @@ void SetMXTVMBridge(int (*MXTVMBridge)(PackedFunc)) {
   }));
 }
 
-PackedFunc* RegisterTVMFunc(const char* name, TVMFunc pfunc, int num_const, int* const_loc) {
+PackedFunc* RegisterTVMFunc(const char*, TVMFunc pfunc, int num_const,
+                            int* const_loc) {
   PackedFunc func(pfunc);
   PackedFunc fset_stream(set_stream);
   const int num_args = 3 + num_const;
   std::vector<TVMValue> values(num_args);
   std::vector<int> type_codes(num_args);
-  values[0].v_handle = &func; type_codes[0] = kFuncHandle;
-  values[1].v_handle = &fset_stream; type_codes[1] = kFuncHandle;
-  values[2].v_int64 = num_const; type_codes[2] = kDLInt;
+  values[0].v_handle = &func;
+  type_codes[0] = kFuncHandle;
+  values[1].v_handle = &fset_stream;
+  type_codes[1] = kFuncHandle;
+  values[2].v_int64 = num_const;
+  type_codes[2] = kDLInt;
   for (int i = 0; i < num_const; ++i) {
     values[i + 3].v_int64 = const_loc[i];
     type_codes[i + 3] = kDLInt;
@@ -68,11 +71,10 @@ PackedFunc* RegisterTVMFunc(const char* name, TVMFunc pfunc, int num_const, int*
   TVMArgs args(&values[0], &type_codes[0], num_args);
   TVMRetValue rv;
   WrapAsyncCall.CallPacked(args, &rv);
-  PACKED_FUNCTIONS[name] = *static_cast<PackedFunc*>(rv.value_.v_handle);
-  return &PACKED_FUNCTIONS[name];
+  PackedFunc* p_rtn_func =
+      new PackedFunc(*static_cast<PackedFunc*>(rv.value_.v_handle));
+  return p_rtn_func;
 }
-
 }
-
 
 #endif
