@@ -40,14 +40,15 @@ using namespace tvm;
 
 static PackedFunc WrapAsyncCall;
 
-void SetMXTVMBridge(int (*MXTVMBridge)(PackedFunc)) {
-  MXTVMBridge(PackedFunc([](TVMArgs args, TVMRetValue*) {
+void SetMXTVMBridge(int (*MXTVMBridge)(PackedFunc*)) {
+  PackedFunc packed_func([](TVMArgs args, TVMRetValue*) {
     if (strcmp(args.values[0].v_str, "WrapAsyncCall") == 0) {
       WrapAsyncCall = *static_cast<PackedFunc*>(args.values[1].v_handle);
       return;
     }
     throw std::runtime_error("Not register WrapAsyncCall");
-  }));
+  });
+  MXTVMBridge(&packed_func);
 }
 
 PackedFunc* RegisterTVMFunc(const char*, TVMFunc pfunc, int num_const,
