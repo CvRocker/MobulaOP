@@ -12,6 +12,12 @@ if not hasattr(mx.nd.NDArray, 'wait_to_write'):
 
 
 def get_pointer(v):
+    cp = ctypes.c_void_p()
+    _LIB.MXNDArrayGetData(v.handle, ctypes.byref(cp))
+    return cp
+
+
+def get_async_pointer(v):
     return v.handle
 
 
@@ -32,7 +38,9 @@ def get_async_func(cpp_info, func_idcode_hash):
     cpp_info.dll.SetMXTVMBridge.argtypes = [ctypes.c_void_p]
     cpp_info.dll.SetMXTVMBridge(_LIB.MXTVMBridge)
     register_func_for_mx = getattr(
-        cpp_info.dll, func_idcode_hash + '_register_mx')
+        cpp_info.dll, func_idcode_hash + '_register_mx', None)
+    if register_func_for_mx is None:
+        return None
     async_func_for_mx = getattr(cpp_info.dll, func_idcode_hash + '_async_mx')
     register_func_for_mx.restype = ctypes.c_void_p
     packed_func_mx = ctypes.c_void_p(register_func_for_mx())

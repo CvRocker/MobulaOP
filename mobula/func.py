@@ -109,6 +109,15 @@ class MobulaFunc:
         self.name = name
         self.func = func
 
+        self.wait_to_read_list = []
+        self.wait_to_write_list = []
+        for i, ptype in enumerate(self.func.arg_types):
+            if ptype.is_pointer:
+                if ptype.is_const:
+                    self.wait_to_read_list.append(i)
+                else:
+                    self.wait_to_write_list.append(i)
+
     def __call__(self, *args, **kwargs):
         # move kwargs into args
         args = list(args)
@@ -123,16 +132,22 @@ class MobulaFunc:
         arg_types = []
         template_mapping = dict()
 
-        glue_mod = None
+        glue_mod = self._get_glue_mod(args)
+        using_async = glue_mod is not None and hasattr(
+            glue_mod, 'get_async_func')
+
+        if not using_async:
+            # Pre-process
+            for i in self.wait_to_read_list:
+                self._wait_to_read(args[i])
+            for i in self.wait_to_write_list:
+                self._wait_to_write(args[i])
+
         for var, ptype in zip(args, self.func.arg_types):
             if ptype.is_pointer:
                 # The type of `var` is Tensor.
-                data, var_dev_id, ctype, glue_mod_ = self._get_tensor_info(
-                    var, ptype, noncont_var_list, temp_var_list, template_mapping)
-                if glue_mod is None:
-                    glue_mod = glue_mod_
-                elif glue_mod != glue_mod_:
-                    glue_mod = 0
+                data, var_dev_id, ctype = self._get_tensor_info(
+                    var, ptype, noncont_var_list, temp_var_list, template_mapping, using_async)
             else:
                 # The type of `var` is Scalar.
                 data, var_dev_id, ctype = self._get_scalar_info(var, ptype)
@@ -151,8 +166,6 @@ class MobulaFunc:
                         "Don't use multiple devices in a call :-(")
                 else:
                     dev_id = var_dev_id
-        if glue_mod == 0:
-            glue_mod = None
 
         # try to know the unknown ctype
         for i, vtype in enumerate(arg_types):
@@ -173,7 +186,17 @@ class MobulaFunc:
         return rtn
 
     @staticmethod
-    def _get_tensor_info(var, ptype, noncont_var_list, temp_var_list, template_mapping):
+    def _wait_to_read(var):
+        if hasattr(var, 'wait_to_read'):
+            var.wait_to_read()
+
+    @staticmethod
+    def _wait_to_write(var):
+        if hasattr(var, 'wait_to_write'):
+            var.wait_to_write()
+
+    @staticmethod
+    def _get_tensor_info(var, ptype, noncont_var_list, temp_var_list, template_mapping, using_async=False):
         """Get tensor info
 
         Parameters
@@ -198,7 +221,8 @@ class MobulaFunc:
         """
 
         glue_mod = glue.backend.get_var_glue(var)
-        data = glue_mod.get_pointer(var)
+        data = glue_mod.get_async_pointer(
+            var) if using_async else glue_mod.get_pointer(var)
         if isinstance(data, (list, tuple)):
             # data = (contiguous_array_pointer, contiguous_array_object)
             if ptype.is_const:
@@ -219,7 +243,7 @@ class MobulaFunc:
             TypeError('Expected Type {} instead of {}'.format(
                 expected_ctype, ctype))
         data = ctypes.cast(data, ctype)
-        return data, dev_id, ctype, glue_mod
+        return data, dev_id, ctype
 
     @staticmethod
     def _get_scalar_info(var, ptype):
@@ -252,6 +276,18 @@ class MobulaFunc:
                 var, ctypes.c_void_p) else ptype.ctype(var)
             ctype = ptype.ctype
         return data, dev_id, ctype
+
+    @staticmethod
+    def _get_glue_mod(datas):
+        glue_mod = None
+        for var in datas:
+            glue_mod_ = glue.backend.get_var_glue(var)
+            if glue_mod is None:
+                glue_mod = glue_mod_
+            else:
+                if glue_mod_ != glue_mod:
+                    return None
+        return glue_mod
 
     def build(self, ctx, template_types=None):
         """Build this function

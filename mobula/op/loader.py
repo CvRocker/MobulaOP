@@ -324,16 +324,23 @@ MOBULA_DLL void %s(const int device_id, %s) {
         name=name
     ) for dtype, name in zip(arg_types, arg_names)])
 
-    args_inst_mx = [_get_args_inst_mx(i, t) for i, t in enumerate(arg_types)]
-    num_const = 0
-    const_loc = []
-    for i, dtype in enumerate(arg_types):
-        if dtype.is_const and dtype.is_pointer:
-            const_loc.append(i)
-            num_const += 1
-    const_loc_code = 'nullptr' if num_const == 0 else 'std::unique_ptr<int[]>(new int[%d]{%s}).get()' % (
-        num_const, ','.join([str(u) for u in const_loc]))
-    register_mx_code = '''
+    using_async_mx = True
+    for dtype in arg_types:
+        if 'void' in dtype.cname:
+            using_async_mx = False
+            break
+    if using_async_mx:
+        args_inst_mx = [_get_args_inst_mx(i, t)
+                        for i, t in enumerate(arg_types)]
+        num_const = 0
+        const_loc = []
+        for i, dtype in enumerate(arg_types):
+            if dtype.is_const and dtype.is_pointer:
+                const_loc.append(i)
+                num_const += 1
+        const_loc_code = 'nullptr' if num_const == 0 else 'std::unique_ptr<int[]>(new int[%d]{%s}).get()' % (
+            num_const, ','.join([str(u) for u in const_loc]))
+        register_mx_code = '''
 MOBULA_DLL tvm::PackedFunc* %s_register_mx() {
   return RegisterTVMFunc("%s", [](tvm::TVMArgs args, tvm::TVMRetValue*) {
     KERNEL_RUN(%s)(%s);
@@ -341,17 +348,26 @@ MOBULA_DLL tvm::PackedFunc* %s_register_mx() {
 }
 ''' % (func_idcode_hash, func_idcode_hash, func_name, ', '.join(args_inst_mx), num_const, const_loc_code)
 
-    async_mx_code = '''
+        async_mx_code = '''
 MOBULA_DLL void %s_async_mx(tvm::PackedFunc *packed_func, %s) {
   (*packed_func)(%s);
 }
 ''' % (func_idcode_hash, args_def_async_mx, args_inst)
-    return kernel_code + register_mx_code + async_mx_code
+        kernel_code += register_mx_code
+        kernel_code += async_mx_code
+    return kernel_code
 
 
-def _generate_func_code(func_idcode_hash, rtn_type, args_def, func_name, args_inst):
+def _generate_func_code(func_idcode_hash, rtn_type, arg_types, arg_names, func_name):
     if rtn_type is None:
         rtn_type = 'void'
+
+    args_def = ', '.join(['{ctype} {name}'.format(
+        ctype=dtype.cname,
+        name=name
+    ) for dtype, name in zip(arg_types, arg_names)])
+    args_inst = ', '.join(arg_names)
+
     code = '''
 MOBULA_DLL %s %s(%s) {
 ''' % (rtn_type, func_idcode_hash, args_def)
@@ -427,7 +443,8 @@ def _add_function(func_map, func_idcode, cpp_info):
         async_name = getattr(glue_mod, 'async_name', None)
         if async_name is not None:
             async_func = glue_mod.get_async_func(cpp_info, func_idcode_hash)
-            setattr(func, async_name, async_func)
+            if async_func is not None:
+                setattr(func, async_name, async_func)
 
     func_map[func_idcode] = func
 

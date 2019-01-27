@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "./ctypes.h"
-#include "./glue_mx.h"
 #include "context/context.h"
 
 namespace mobula {

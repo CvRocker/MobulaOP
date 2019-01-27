@@ -2,9 +2,7 @@
 #define MOBULA_INC_GLUE_MX_H_
 
 #include <cstring>
-#include <iostream>
-#include <map>
-#include <string>
+#include <vector>
 #include "tvm_packed_func.h"
 
 namespace mobula {
